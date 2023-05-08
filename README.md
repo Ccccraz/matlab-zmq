@@ -1,6 +1,8 @@
 matlab-zmq
 ==========
 
+**NOTE:** this fork is slightly modified to include precompiled mex files for Linux, and include some minimal pull requests from other forks.
+
 What's this all about?
 ----------------------
 
@@ -26,8 +28,9 @@ Stuff Doesn't Work
   - Versions: MATLAB, ZMQ and Operating System
   - Which version of matlab-zmq you're using (i.e. which branch, commit etc).
   - What you are trying to do - preferably include a succinct code example which illustrates the problem.
-  - What doesn't work - please describe behaviour explicitly and include any error messages you encounter.
-
+  - What doesn't work - please describe behavior explicitly and include any error messages you encounter.
+  - When building with Matlab R2022b, you may need to launch Matlab with the environment variable `LD_PRELOAD` set to the path to your system's `libstdc++` binary
+  - e.g. `LD_PRELOAD=/lib/x86_64-linux-gnu/libstdc++.so.6 matlab` on Linux systems
 How can I help?
 -----------
 
