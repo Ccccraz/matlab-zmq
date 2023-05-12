@@ -122,10 +122,10 @@ function success = build(varargin)
     % Default fallback
     if (ispc)
       % == WINDOWS ==
-      config_win;
+      %config_win;
     else
       % == POSIX ==
-      config_unix;
+      %config_unix;
     end
 
     if (~testzmq(ZMQ_LIB_PATH) || ~testzmq(ZMQ_INCLUDE_PATH))

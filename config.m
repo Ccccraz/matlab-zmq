@@ -1,9 +1,10 @@
 % Please edit this file with the correct paths for ZMQ instalation.
 
 if (ismac)
-	ZMQ_COMPILED_LIB = './libzmq.a';
-	ZMQ_LIB_PATH = '/usr/local/Cellar/zeromq/4.3.4/lib/';
-	ZMQ_INCLUDE_PATH = '/usr/local/Cellar/zeromq/4.3.4/include/';
+	% if using apple silicon, install a x86 homebrew first
+	ZMQ_COMPILED_LIB = 'libzmq.a';
+	ZMQ_LIB_PATH = '/usr/local/homebrew/Cellar/zeromq/4.3.4/lib/';
+	ZMQ_INCLUDE_PATH = '/usr/local/homebrew/Cellar/zeromq/4.3.4/include/';
 elseif (isunix)
 	ZMQ_COMPILED_LIB = 'libzmq.a';
 	ZMQ_LIB_PATH = '/usr/lib/x86_64-linux-gnu/';
