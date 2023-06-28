@@ -119,19 +119,8 @@ function success = build(varargin)
   config;
 
   if (~testzmq(ZMQ_LIB_PATH) || ~testzmq(ZMQ_INCLUDE_PATH))
-    % Default fallback
-    if (ispc)
-      % == WINDOWS ==
-      %config_win;
-    else
-      % == POSIX ==
-      %config_unix;
-    end
-
-    if (~testzmq(ZMQ_LIB_PATH) || ~testzmq(ZMQ_INCLUDE_PATH))
-      error('make:matlab-zmq:badConfig', ...
-        'Could not find ZMQ files, please edit ''config.m'' and try again.');
-    end
+    error('make:matlab-zmq:badConfig', ...
+      'Could not find ZMQ files, please edit ''config.m'' and try again.');
   end
 
   %% SCRIPT VARS
@@ -169,7 +158,7 @@ function success = build(varargin)
   clean('*.o');
 
   files = ls(fullfile(fullfile(lib_path, '+zmq/+core'), '*.mex*'));
-  if size(files, 1) == length(COMPILE_LIST)
+  if size(split(strip(files)), 1) == length(COMPILE_LIST)
     success = true;
     fprintf('\nSuccesful build for:\n');
   else
