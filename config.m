@@ -3,8 +3,8 @@
 if (ismac)
 	% if using apple silicon, install a x86 homebrew first
 	ZMQ_COMPILED_LIB = 'libzmq.a';
-	ZMQ_LIB_PATH = '/usr/local/homebrew/Cellar/zeromq/4.3.4/lib/';
-	ZMQ_INCLUDE_PATH = '/usr/local/homebrew/Cellar/zeromq/4.3.4/include/';
+	ZMQ_LIB_PATH = '/opt/homebrew/Cellar/zeromq/4.3.5_1/lib/';
+	ZMQ_INCLUDE_PATH = '/opt/homebrew/Cellar/zeromq/4.3.5_1/include/';
 elseif (isunix)
 	ZMQ_COMPILED_LIB = 'libzmq.a';
 	ZMQ_LIB_PATH = '/usr/lib/x86_64-linux-gnu/';
