@@ -18,11 +18,15 @@ function pub_server(varargin)
     zmq.core.bind(socket, sprintf('tcp://*:%d', port));
 
     fprintf('Broadcasting temperature information...\n');
-    while (1)
+	tStart = GetSecs;
+	while GetSecs < tStart + 120
         topic = randi([15198, 15202], 1, 1); % Choose a brazilian CEP code (first 5 digits)
         data = randi([10, 45]);              % Pick a random temperature
         message = sprintf('%d %d', topic, data);
         fprintf('%s\n', message);
         zmq.core.send(socket, uint8(message));
         pause(1)
-end
+	end
+
+	zmq.core.close(socket);
+	zmq.core.ctx_term(context);
