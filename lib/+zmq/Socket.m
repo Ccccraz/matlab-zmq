@@ -15,15 +15,15 @@ classdef Socket < handle
         %bindings  Cell array of endpoints the socket is bound to.
         %   This property stores the endpoints that the socket is currently
         %   bound to. It is used for cleanup when the socket is closed.
-        bindings;
+        bindings
         %connections  Cell array of endpoints the socket is connected to.
         %   This property stores the endpoints that the socket is currently
         %   connected to. It is used for cleanup when the socket is closed.
-        connections;
+        connections
         %defaultBufferLength  Default buffer length for receiving messages.
         %   This property specifies the default buffer length used when
         %   receiving messages from the socket.
-        defaultBufferLength;
+        defaultBufferLength
     end
 
     methods
@@ -44,7 +44,7 @@ classdef Socket < handle
             % Init properties
             obj.bindings = {};
             obj.connections = {};
-            obj.defaultBufferLength = 255*12;
+            obj.defaultBufferLength = 2^19;
         end
 
         function bind(obj, endpoint)
@@ -124,14 +124,13 @@ classdef Socket < handle
             %       message  - A cell array containing the message parts.
             [buffLen, options] = obj.normalize_msg_options(varargin{:});
         
-            message = [];
+            message = {};
         
             keepReceiving = 1;
         
             while keepReceiving > 0
-                part = obj.recv(buffLen, options{:});
-                message = [message part];
-                keepReceiving = obj.get('rcvmore');
+                [part, keepReceiving] = obj.recv(buffLen, options{:});
+                message = [message {part}];
             end
         end
 
@@ -149,7 +148,7 @@ classdef Socket < handle
             message = char(obj.recv_multipart(varargin{:}));
         end
 
-        function varargout = recv(obj, varargin)
+        function [msg, more] = recv(obj, varargin)
             %recv  Receives a message.
             %   message = recv(obj, varargin) receives a message from the socket.
             %
@@ -160,7 +159,8 @@ classdef Socket < handle
             %   Outputs:
             %       message  - The received message.
             [buffLen, options] = obj.normalize_msg_options(varargin{:});
-            [varargout{1:nargout}] = zmq.core.recv(obj.socketPointer, buffLen, options{:});
+            msg = zmq.core.recv(obj.socketPointer, buffLen, options{:});
+            more = obj.get('rcvmore');
         end
 
         function send_multipart(obj, message, varargin)
@@ -170,23 +170,31 @@ classdef Socket < handle
             %
             %   Inputs:
             %       obj      - A Socket object.
-            %       message  - A cell array containing the message parts to send.
+            %       message  - cell array / int8 array containing the message parts to send.
             %       varargin - Optional arguments for sending the message.
             [buffLen, options] = obj.normalize_msg_options(varargin{:});
         
-            offset = 1;
-        
-            L = length(message);  % length of original message
-            N = floor(L/buffLen); % number of multipart messages
-        
-            for m = 1:N
-                part = message(offset:(offset+buffLen-1));
-                offset = offset+buffLen;
-                obj.send(part, 'sndmore');
-            end
-        
-            part = message(offset:end);
-            obj.send(part);
+			if iscell(message)
+				for m = 1:length(message)-1
+					try
+						obj.send(message{m}, 'sndmore');
+					catch
+						
+					end
+				end
+				obj.send(message{end});
+			else
+				offset = 1;
+            	L = length(message);  % length of original message
+            	N = floor(L/buffLen); % number of multipart messages
+            	for m = 1:N
+                	part = message(offset:(offset+buffLen-1));
+                	offset = offset+buffLen;
+                	obj.send(part, 'sndmore');
+				end
+            	part = message(offset:end);
+            	obj.send(part);
+			end
         end
 
         function send_string(obj, message, varargin)
@@ -252,10 +260,12 @@ classdef Socket < handle
             %
             %   Inputs:
             %       obj - A Socket object.
-            status = zmq.core.close(obj.socketPointer);
-            if (status == 0)
-                obj.socketPointer = 0; % ensure NULL pointer
-            end
+			try
+				status = zmq.core.close(obj.socketPointer);
+				if (status == 0)
+					obj.socketPointer = 0; % ensure NULL pointer
+				end
+			end
         end
 
         function delete(obj)
