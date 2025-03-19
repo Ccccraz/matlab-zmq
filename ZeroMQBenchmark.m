@@ -22,6 +22,7 @@ classdef ZeroMQBenchmark < handle
 	properties
 		% Configuration parameters
 		Port = 5555
+		IP   = 'localhost'
 		HeaderSize = 2^6  % 64 bytes
 		DataSize = 2^19 
 		NumRuns = 5
@@ -80,7 +81,7 @@ classdef ZeroMQBenchmark < handle
 				% Create and bind socket
 				obj.Socket = obj.Context.socket('REP');
 				obj.Socket.defaultBufferLength = obj.ChunkSizes(end); % Set receive buffer size
-				obj.Socket.bind(['tcp://*:' num2str(obj.Port)]);
+				obj.Socket.bind(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
 				fprintf('Server running on port %d. Use Ctrl+C to stop.\n', obj.Port);
 				
@@ -191,7 +192,7 @@ classdef ZeroMQBenchmark < handle
 			for run = 1:obj.NumRuns
 				% Create and connect socket for this run
 				socket = obj.Context.socket('REQ');
-				socket.connect(['tcp://localhost:' num2str(obj.Port)]);
+				socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
 				% Prepare message frames
 				frames = [{header} chunks];
