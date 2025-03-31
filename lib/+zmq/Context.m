@@ -1,15 +1,17 @@
 classdef Context < handle
 
-    properties (Access = private)
+    properties (GetAccess = public, SetAccess = private)
         contextPointer
         spawnedSockets
+		date
     end
 
     methods
         function obj = Context(varargin)
             if (nargin ~= 0)
                 warning('zmq:Context:extraConstructArgs','Extraneous constructor arguments.');
-            end
+			end
+			obj.date = datetime;
             % Core API
             obj.contextPointer = zmq.core.ctx_new();
             % Initi properties

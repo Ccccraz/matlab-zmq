@@ -1,20 +1,21 @@
-classdef ZeroMQBenchmark < handle
-	% ZeroMQBenchmark A class for benchmarking ZeroMQ frame sizes
-	% Requires https://github.com/iandol/matlab-zmq
+classdef JeroMQBenchmark < handle
+	% JeroMQBenchmark A class for benchmarking ZeroMQ frame sizes using JeroMQ
+	% Requires JeroMQ: https://github.com/jeromq/jeromq | https://javadoc.io/doc/org.zeromq/jeromq/latest/index.html
+	% and the jeromq-0.6.0.jar file added to the javaclasspath
 	% Sample results:
 	% === BENCHMARK RESULTS ===
 	% Benchmark for 128 byte header and 1048576 bytes data
 	% Chunk Size (bytes)   # Frames   Avg Latency (ms)     Avg Throughput (Mbps)
 	% ----------------------------------------------------------------------
-	% 512                  2049       322.53               26.03               
-	% 1024                 1025       153.76               54.58               
-	% 8192                 129        25.41                330.23              
-	% 32768                33         11.33                771.22              
-	% 65536                17         9.36                 915.93              
-	% 131072               9          7.08                 1338.52             
-	% 262144               5          6.59                 1365.91             
-	% 524288               3          5.25                 1755.56             
-	% 1048576              2          6.26                 1387.05             
+	% 512                  2049       322.53               26.03
+	% 1024                 1025       153.76               54.58
+	% 8192                 129        25.41                330.23
+	% 32768                33         11.33                771.22
+	% 65536                17         9.36                 915.93
+	% 131072               9          7.08                 1338.52
+	% 262144               5          6.59                 1365.91
+	% 524288               3          5.25                 1755.56
+	% 1048576              2          6.26                 1387.05
 	% === SUMMARY ===
 	% Lowest latency: 524288 bytes (5.25ms)
 	% Highest throughput: 524288 bytes (1755.56Mbps)
@@ -23,15 +24,15 @@ classdef ZeroMQBenchmark < handle
 		% Configuration parameters
 		Port = 5555
 		IP   = 'localhost'
-		HeaderSize = 2^6  % 64 bytes
-		DataSize = 2^19 
+		HeaderSize = 2^7  % 128 bytes
+		DataSize = 2^20
 		NumRuns = 5
 		ChunkSizes = [2^9, 2^10, 2^13, 2^15, 2^16, 2^17, 2^18, 2^19, 2^20]
 		
 		% Results storage
 		Results = struct('chunk_size', {}, 'num_frames', {}, 'latency_ms', {}, 'throughput_mbps', {})
 		
-		% ZeroMQ objects
+		 % JeroMQ Java objects
 		Context
 		Socket
 		IsServer = false
@@ -39,9 +40,9 @@ classdef ZeroMQBenchmark < handle
 	end
 	
 	methods
-		function obj = ZeroMQBenchmark(varargin)
+		function obj = JeroMQBenchmark(varargin)
 			% Constructor with optional parameter overrides
-			% Usage: benchmark = ZeroMQBenchmark('Port', 5556, 'DataSize', 1000000)
+			% Usage: benchmark = JeroMQBenchmark('Port', 5556, 'DataSize', 1000000)
 			
 			% Parse named parameters
 			for i = 1:2:length(varargin)
@@ -52,35 +53,42 @@ classdef ZeroMQBenchmark < handle
 				end
 			end
 			
-			% Initialize ZeroMQ context
-			obj.Context = zmq.Context();
+			 % Add JeroMQ jar to javaclasspath if not already present
+			if ~any(contains(javaclasspath, 'jeromq-0.6.0.jar'))
+				javaaddpath('jeromq-0.6.0.jar');
+				fprintf('Added JeroMQ jar to javaclasspath.\n');
+			end
+			
+			
+			% Initialize JeroMQ context
+			obj.Context = JeroContext();
 		end
 		
 		function delete(obj)
-			% Destructor to clean up ZeroMQ resources
+			% Destructor to clean up JeroMQ resources
 			obj.stopServer();  % Stop the server if running
 			
 			if ~isempty(obj.Socket)
 				fprintf('Socket stopped.\n');
 				obj.Socket.close();
+				obj.Socket.dispose();
 			end
 			
 			if ~isempty(obj.Context)
 				fprintf('Context terminated.\n');
 				obj.Context.term();
-				obj.Context = zmq.Context();
+				obj.Context.close();
 			end
 		end
 		
 		function startServer(obj)
-			% Start a ZeroMQ server in this instance
+			% Start a JeroMQ server in this instance
 			if ~obj.IsServer
 				obj.IsServer = true;
 				obj.Running = true;
 				
 				% Create and bind socket
 				obj.Socket = obj.Context.socket('REP');
-				obj.Socket.defaultBufferLength = obj.ChunkSizes(end); % Set receive buffer size
 				obj.Socket.bind(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
 				fprintf('Server running on port %d. Use Ctrl+C to stop.\n', obj.Port);
@@ -102,6 +110,7 @@ classdef ZeroMQBenchmark < handle
 			if obj.IsServer
 				obj.IsServer = false;
 				obj.Socket.close();
+				obj.Socket.dispose();
 				fprintf('Server stopped.\n');
 			end
 		end
@@ -110,22 +119,29 @@ classdef ZeroMQBenchmark < handle
 			% Main server loop
 			while obj.Running
 				% Receive multipart message
-				frames = obj.Socket.recv_multipart();
-				fprintf('Received %d frames\n', length(frames));
-				if isscalar(frames) && strcmpi(char(frames{1}),'exit')
-					fprintf('Got exit message.\n');
-					obj.Socket.send_string('exit');
-					obj.stopServer;
+				message = obj.Socket.recv(0);
+				
+				if ~isempty(message)
+					frames = cell(1,1);
+					frames{1} = message;
+					
+					fprintf('Received %d frames\n', length(frames));
+					
+					if isscalar(frames) && strcmpi(char(frames{1}),'exit')
+						fprintf('Got exit message.\n');
+						obj.Socket.send('exit',0);
+						obj.stopServer;
+					end
+					% Echo back the message
+					obj.Socket.send(message,0);
 				end
-				% Echo back the message
-				obj.Socket.send_multipart(frames);
 			end
 		end
 		
 		function displayServerInstructions(obj)
 			% Display instructions for starting a server in another MATLAB instance
 			fprintf('To run the server, start another MATLAB instance and run:\n');
-			fprintf('server = ZeroMQBenchmark(''Port'', %d);\n', obj.Port);
+			fprintf('server = JeroMQBenchmark(''Port'', %d);\n', obj.Port);
 			fprintf('server.startServer();\n');
 			input('Press Enter when the server is running...');
 		end
@@ -179,7 +195,7 @@ classdef ZeroMQBenchmark < handle
 			end
 			
 			num_frames = length(chunks) + 1;  % +1 for header
-
+			
 			fprintf('Benchmarking number of frames: %i\n', num_frames);
 			
 			% Calculate total bytes to be sent
@@ -192,20 +208,25 @@ classdef ZeroMQBenchmark < handle
 			for run = 1:obj.NumRuns
 				% Create and connect socket for this run
 				socket = obj.Context.socket('REQ');
-				socket.defaultBufferLength = obj.ChunkSizes(end); % Set receive buffer size
 				socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
 				% Prepare message frames
 				frames = [{header} chunks];
 				
+				% Convert frames to Java byte arrays
+				java_frames = cell(size(frames));
+				for k = 1:length(frames)
+					java_frames{k} = java.nio.ByteBuffer.wrap(frames{k}).array();
+				end
+				
 				% Warm-up round
-				socket.send_multipart(frames);
-				socket.recv_multipart();
+				obj.sendMultipart(socket, java_frames);
+				obj.recvMultipart(socket);
 				
 				% Test round
 				tic;
-				socket.send_multipart(frames);
-				socket.recv_multipart();
+				obj.sendMultipart(socket, java_frames);
+				obj.recvMultipart(socket);
 				elapsed_time = toc;
 				
 				% Calculate metrics
@@ -220,6 +241,7 @@ classdef ZeroMQBenchmark < handle
 				
 				% Close socket
 				socket.close();
+				socket.dispose();
 				pause(0.5);  % Brief pause between runs
 			end
 			
@@ -236,8 +258,9 @@ classdef ZeroMQBenchmark < handle
 		function displayResults(obj)
 			socket = obj.Context.socket('REQ');
 			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
-			socket.send_string('exit');
+			socket.send('exit',0);
 			socket.close();
+			socket.dispose();
 			% Display the benchmark results in a table format
 			disp('=== BENCHMARK RESULTS ===');
 			fprintf('Benchmark for %i byte header and %i bytes data\n', ...
@@ -287,9 +310,36 @@ classdef ZeroMQBenchmark < handle
 			
 			sgtitle('ZeroMQ Frame Size Benchmark Results');
 		end
+		
+		function sendMultipart(obj, socket, frames)
+			% Send a multipart message using JeroMQ
+			for i = 1:length(frames)
+				if i < length(frames)
+					socket.send(frames{i}, org.zeromq.ZMQ.SNDMORE);
+				else
+					socket.send(frames{i}, 0);
+				end
+			end
+		end
+		
+		function received = recvMultipart(obj, socket)
+			% Receive a multipart message using JeroMQ
+			received = {};
+			while true
+				frame = socket.recv(0);
+				if ~isempty(frame)
+					received{end+1} = frame;
+					if ~socket.hasReceiveMore()
+						break;
+					end
+				else
+					break;
+				end
+			end
+		end
 	end
 	
-	methods(Static)        
+	methods(Static)
 		function [client, server] = createClientServerPair(port)
 			% Create a client and server pair for testing
 			% Note: This only works if you have parallel computing toolbox
@@ -298,7 +348,7 @@ classdef ZeroMQBenchmark < handle
 			end
 			
 			% Create server instance
-			server = ZeroMQBenchmark('Port', port);
+			server = JeroMQBenchmark('Port', port);
 			
 			% Start server in background task
 			serverFuture = parfeval(@server.startServer, 0);
@@ -307,7 +357,7 @@ classdef ZeroMQBenchmark < handle
 			pause(1);
 			
 			% Create client instance
-			client = ZeroMQBenchmark('Port', port);
+			client = JeroMQBenchmark('Port', port);
 			
 			fprintf('Client and server pair created.\n');
 			fprintf('Use client.runBenchmark() to run the benchmark.\n');

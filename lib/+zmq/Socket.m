@@ -4,11 +4,13 @@ classdef Socket < handle
     %   ZeroMQ sockets in MATLAB. It handles socket creation, binding,
     %   connection, message sending and receiving, and socket closure.
 
-    properties (Access = private)
+    properties (GetAccess = public, SetAccess = private)
         %socketPointer  Pointer to the underlying ZeroMQ socket.
         %   This pointer is used by the core functions to interact with the
         %   ZeroMQ library.
-        socketPointer;
+        socketPointer
+		%
+		date
     end
 
     properties (Access = public)
@@ -38,6 +40,7 @@ classdef Socket < handle
             %
             %   Outputs:
             %       obj          - A Socket object.
+			obj.date = datetime;
             socketType = obj.normalize_const_name(socketType);
             % Core API
             obj.socketPointer = zmq.core.socket(contextPointer, socketType);
@@ -130,6 +133,9 @@ classdef Socket < handle
         
             while keepReceiving > 0
                 [part, keepReceiving] = obj.recv(buffLen, options{:});
+				if isscalar(part) && part == -1 && isa(part,'int32')
+					warning('Receive got a -1, proabably a timeout...');
+				end
                 message = [message {part}];
             end
         end
@@ -163,7 +169,7 @@ classdef Socket < handle
             more = obj.get('rcvmore');
         end
 
-        function send_multipart(obj, message, varargin)
+        function nbytes = send_multipart(obj, message, varargin)
             %send_multipart  Sends a multipart message.
             %   send_multipart(obj, message, varargin) sends a multipart message
             %   through the socket.
@@ -172,32 +178,36 @@ classdef Socket < handle
             %       obj      - A Socket object.
             %       message  - cell array / int8 array containing the message parts to send.
             %       varargin - Optional arguments for sending the message.
-            [buffLen, options] = obj.normalize_msg_options(varargin{:});
-        
+            [buffLen, ~] = obj.normalize_msg_options(varargin{:});
+			nbytes = 0;
 			if iscell(message)
 				for m = 1:length(message)-1
 					try
-						obj.send(message{m}, 'sndmore');
+						n = obj.send(message{m}, 'sndmore');
+						nbytes = nbytes + n;
 					catch
 						
 					end
 				end
-				obj.send(message{end});
+				n = obj.send(message{end});
+				nbytes = nbytes + n;
 			else
 				offset = 1;
             	L = length(message);  % length of original message
             	N = floor(L/buffLen); % number of multipart messages
-            	for m = 1:N
+				for m = 1:N
                 	part = message(offset:(offset+buffLen-1));
                 	offset = offset+buffLen;
-                	obj.send(part, 'sndmore');
+                	n = obj.send(part, 'sndmore');
+					nbytes = nbytes + n;
 				end
             	part = message(offset:end);
-            	obj.send(part);
+            	n = obj.send(part);
+				nbytes = nbytes + n;
 			end
         end
 
-        function send_string(obj, message, varargin)
+		function nbytes = send_string(obj, message, varargin)
             %send_string  Sends a string message.
             %   send_string(obj, message, varargin) sends a string message
             %   through the socket.
@@ -206,7 +216,7 @@ classdef Socket < handle
             %       obj      - A Socket object.
             %       message  - The string to send.
             %       varargin - Optional arguments for sending the message.
-            obj.send_multipart(uint8(message), varargin{:});
+            nbytes = obj.send_multipart(uint8(message), varargin{:});
         end
 
         function nbytes = send(obj, data, varargin)
@@ -224,7 +234,7 @@ classdef Socket < handle
             nbytes = zmq.core.send(obj.socketPointer, data, options{:});
         end
 
-        function set(obj, name, value)
+		function status = set(obj, name, value)
             %set  Sets a socket option.
             %   set(obj, name, value) sets the value of the specified socket
             %   option.
@@ -234,7 +244,7 @@ classdef Socket < handle
             %       name  - The name of the socket option (e.g., 'RCVTIMEO').
             %       value - The value to set for the option.
             optName = obj.normalize_const_name(name);
-            option = zmq.core.setsockopt(obj.socketPointer, optName, value);
+            status = zmq.core.setsockopt(obj.socketPointer, optName, value);
         end
 
         function unbind(obj, endpoint)
@@ -254,13 +264,14 @@ classdef Socket < handle
             end
         end
 
-        function close(obj)
+        function status = close(obj)
             %close  Closes the socket.
             %   close(obj) closes the ZeroMQ socket.
             %
             %   Inputs:
             %       obj - A Socket object.
-			try
+			status = -1;
+			try %#ok<*TRYNC>
 				status = zmq.core.close(obj.socketPointer);
 				if (status == 0)
 					obj.socketPointer = 0; % ensure NULL pointer
@@ -277,7 +288,7 @@ classdef Socket < handle
                 cellfun(@(b) obj.unbind(b), obj.bindings, 'UniformOutput', false);
                 cellfun(@(c) obj.disconnect(c), obj.connections, 'UniformOutput', false);
                 % Avoid linger time
-                obj.set('linger', 0);
+                obj.set('LINGER', 0);
                 % close
                 obj.close;
             end
