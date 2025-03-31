@@ -1,6 +1,17 @@
 classdef ZeroMQBenchmark < handle
 	% ZeroMQBenchmark A class for benchmarking ZeroMQ frame sizes
 	% Requires https://github.com/iandol/matlab-zmq
+	%
+	% on machine 1: 
+	%   s = ZeroMQBenchmark;
+	%   s.IP = '*'; % bind to any address
+	%   s.startServer();
+	% on machine 2:
+	%   c = ZeroMQBenchmark;
+	%   c.IP = 'localhost'; % whatever the server is
+	%   c.runBenchmark;
+	%
+	%
 	% Sample results:
 	% === BENCHMARK RESULTS ===
 	% Benchmark for 128 byte header and 1048576 bytes data
@@ -24,7 +35,7 @@ classdef ZeroMQBenchmark < handle
 		Port = 5555
 		IP   = 'localhost'
 		HeaderSize = 2^6  % 64 bytes
-		DataSize = 2^19 
+		DataSize = 2^19
 		NumRuns = 5
 		ChunkSizes = [2^9, 2^10, 2^13, 2^15, 2^16, 2^17, 2^18, 2^19, 2^20]
 		
