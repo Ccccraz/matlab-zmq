@@ -101,9 +101,9 @@ classdef JeroMQBenchmark < handle
 						message = obj.recvMultipart(obj.Socket);
 						if ~isempty(message)
 							fprintf('Received %d frames\n', length(message));
-							if iscell(message) && ischar(message{1}) && strcmpi(char(message{1}),'exit')
+							if iscell(message) && ischar(message{1}) && contains(char(message{1}),'exit')
 								fprintf('Got exit message.\n');
-								obj.Socket.send('exit',0);
+								obj.sendMultipart(obj.Socket,{'ok'});
 								obj.stopServer;
 							end
 							% Echo back the message
@@ -241,10 +241,7 @@ classdef JeroMQBenchmark < handle
 		end
 		
 		function displayResults(obj)
-			socket = obj.Context.socket('REQ');
-			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
-			socket.send('exit',0);
-			socket.close();
+			obj.quitServer()
 			% Display the benchmark results in a table format
 			disp('=== BENCHMARK RESULTS ===');
 			fprintf('Benchmark for %i byte header and %i bytes data\n', ...
@@ -269,6 +266,15 @@ classdef JeroMQBenchmark < handle
 				obj.Results(min_latency_idx).chunk_size, obj.Results(min_latency_idx).latency_ms);
 			fprintf('Highest throughput: %d bytes (%.2fMbps)\n', ...
 				obj.Results(max_throughput_idx).chunk_size, obj.Results(max_throughput_idx).throughput_mbps);
+		end
+
+		function quitServer(obj)
+			socket = obj.Context.socket('REQ');
+			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
+			frames = {'exit',1};
+			obj.sendMultipart(socket, frames);
+			received = obj.recvMultipart(socket);
+			socket.close();
 		end
 		
 		function plotResults(obj)

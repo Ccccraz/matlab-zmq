@@ -18,19 +18,6 @@ classdef Context < handle
             obj.spawnedSockets = {};
         end
 
-		function delete(obj)
-			if (obj.contextPointer ~= 0)
-				for n = 1:length(obj.spawnedSockets)
-					socketObj = obj.spawnedSockets{n};
-					try %#ok<*TRYNC>
-						socketObj.cleanup();
-					end
-				end
-				zmq.core.ctx_shutdown(obj.contextPointer);
-				obj.term;
-			end
-		end
-
 		% This exposes the underlying context pointer.
 		function ptr = get_ptr(obj)
 			ptr = obj.contextPointer;
@@ -54,9 +41,28 @@ classdef Context < handle
 			obj.spawnedSockets{end+1} = newSocket;
 		end
 
+		function close(obj)
+			if obj.contextPointer ~= 0
+				for n = 1:length(obj.spawnedSockets)
+					socketObj = obj.spawnedSockets{n};
+					try %#ok<*TRYNC>
+						socketObj.cleanup();
+					end
+				end
+				try zmq.core.ctx_term(obj.contextPointer); end
+				obj.contextPointer = 0;
+			end
+		end
+
 		function term(obj)
-			try zmq.core.ctx_term(obj.contextPointer); end
-			obj.contextPointer = 0;  % ensure NULL pointer
+			if (obj.contextPointer ~= 0)
+				try zmq.core.ctx_term(obj.contextPointer); end
+				obj.contextPointer = 0;  % ensure NULL pointer
+			end
+		end
+
+		function delete(obj)
+			close(obj);
 		end
 
 	end

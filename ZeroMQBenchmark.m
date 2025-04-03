@@ -210,13 +210,13 @@ classdef ZeroMQBenchmark < handle
 				frames = [{header} chunks];
 				
 				% Warm-up round
-				socket.send_multipart(frames);
-				socket.recv_multipart();
+				obj.sendMultipart(socket, frames);
+				recv = obj.recvMultipart(socket);
 				
 				% Test round
 				tic;
-				socket.send_multipart(frames);
-				socket.recv_multipart();
+				obj.sendMultipart(socket, frames);
+				recv = obj.recvMultipart(socket);
 				elapsed_time = toc;
 				
 				% Calculate metrics
@@ -242,6 +242,34 @@ classdef ZeroMQBenchmark < handle
 				'throughput_mbps', mean(run_throughputs));
 			
 			obj.Results(result_index) = result;
+		end
+
+		function sendMultipart(obj, socket, frames)
+			% Send a multipart message using JeroMQ
+			if ~exist('socket','var') || isempty(socket); socket = obj.Socket; end
+			if ~exist('frames','var') || isempty(frames); frames = {1:3,2:4,3:5}; end
+			for i = 1:length(frames)
+				if i < length(frames)
+					socket.send(frames{i}, 'sndmore');
+				else
+					socket.send(frames{i});
+				end
+			end
+		end
+		
+		function received = recvMultipart(obj, socket)
+			% Receive a multipart message using JeroMQ
+			if ~exist('socket','var') || isempty(socket); socket = obj.Socket; end
+			if isempty(socket); warning('No socket'); return; end
+			received = {};
+			keepReceiving = 1;
+			while keepReceiving > 0
+				part = socket.recv();
+				if ~isempty(part)
+					received{end+1} = part;
+				end
+				keepReceiving = socket.get('rcvmore');
+			end
 		end
 		
 		function displayResults(obj)
