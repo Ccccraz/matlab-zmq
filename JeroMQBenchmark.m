@@ -26,6 +26,7 @@ classdef JeroMQBenchmark < handle
 		IP   = 'localhost'
 		HeaderSize = 2^7  % 128 bytes
 		DataSize = 2^20
+		BufferSize = 2^20
 		NumRuns = 5
 		ChunkSizes = [2^9, 2^10, 2^13, 2^15, 2^16, 2^17, 2^18, 2^19, 2^20]
 		
@@ -55,10 +56,9 @@ classdef JeroMQBenchmark < handle
 			
 			 % Add JeroMQ jar to javaclasspath if not already present
 			if ~any(contains(javaclasspath, 'jeromq-0.6.0.jar'))
-				javaaddpath('jeromq-0.6.0.jar');
+				javaaddpath('jeromq-0.6.0.jar','-begin');
 				fprintf('Added JeroMQ jar to javaclasspath.\n');
 			end
-			
 			
 			% Initialize JeroMQ context
 			obj.Context = JeroContext();
@@ -71,33 +71,49 @@ classdef JeroMQBenchmark < handle
 			if ~isempty(obj.Socket)
 				fprintf('Socket stopped.\n');
 				obj.Socket.close();
-				obj.Socket.dispose();
 			end
 			
 			if ~isempty(obj.Context)
 				fprintf('Context terminated.\n');
-				obj.Context.term();
-				obj.Context.close();
+				obj.Context.delete();
 			end
 		end
 		
 		function startServer(obj)
 			% Start a JeroMQ server in this instance
 			if ~obj.IsServer
-				obj.IsServer = true;
-				obj.Running = true;
-				
 				% Create and bind socket
 				obj.Socket = obj.Context.socket('REP');
+				obj.Socket.set('ZMQ_RCVBUF',obj.BufferSize);
+				obj.Socket.set('ZMQ_RCVTIMEO', -1);
+				obj.Socket.set('ZMQ_SNDTIMEO', -1);
 				obj.Socket.bind(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
 				fprintf('Server running on port %d. Use Ctrl+C to stop.\n', obj.Port);
 				
+				obj.IsServer = true;
+				obj.Running = true;
+				
 				% Run server loop
 				try
-					obj.runServerLoop();
+					while obj.Running
+						% Receive multipart message
+						message = obj.recvMultipart(obj.Socket);
+						if ~isempty(message)
+							fprintf('Received %d frames\n', length(message));
+							if iscell(message) && ischar(message{1}) && strcmpi(char(message{1}),'exit')
+								fprintf('Got exit message.\n');
+								obj.Socket.send('exit',0);
+								obj.stopServer;
+							end
+							% Echo back the message
+							obj.sendMultipart(obj.Socket,message);
+						end
+					end
 				catch e
-					fprintf('Server stopped: %s\n', e.message);
+					fprintf('Server stopped: %s %s\n', e.identifier, e.message);
+					getReport(e);
+					obj.stopServer();
 				end
 			else
 				fprintf('Server is already running\n');
@@ -106,44 +122,12 @@ classdef JeroMQBenchmark < handle
 		
 		function stopServer(obj)
 			% Stop the server if it's running
-			obj.Running = false;
 			if obj.IsServer
-				obj.IsServer = false;
 				obj.Socket.close();
-				obj.Socket.dispose();
+				obj.IsServer = false;
 				fprintf('Server stopped.\n');
 			end
-		end
-		
-		function runServerLoop(obj)
-			% Main server loop
-			while obj.Running
-				% Receive multipart message
-				message = obj.Socket.recv(0);
-				
-				if ~isempty(message)
-					frames = cell(1,1);
-					frames{1} = message;
-					
-					fprintf('Received %d frames\n', length(frames));
-					
-					if isscalar(frames) && strcmpi(char(frames{1}),'exit')
-						fprintf('Got exit message.\n');
-						obj.Socket.send('exit',0);
-						obj.stopServer;
-					end
-					% Echo back the message
-					obj.Socket.send(message,0);
-				end
-			end
-		end
-		
-		function displayServerInstructions(obj)
-			% Display instructions for starting a server in another MATLAB instance
-			fprintf('To run the server, start another MATLAB instance and run:\n');
-			fprintf('server = JeroMQBenchmark(''Port'', %d);\n', obj.Port);
-			fprintf('server.startServer();\n');
-			input('Press Enter when the server is running...');
+			obj.Running = false;
 		end
 		
 		function results = runBenchmark(obj)
@@ -208,25 +192,27 @@ classdef JeroMQBenchmark < handle
 			for run = 1:obj.NumRuns
 				% Create and connect socket for this run
 				socket = obj.Context.socket('REQ');
+				socket.set('ZMQ_RCVBUF',obj.BufferSize);
+				socket.set('ZMQ_RCVTIMEO', -1);
+				socket.set('ZMQ_SNDTIMEO', -1);
 				socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
-				
+
 				% Prepare message frames
 				frames = [{header} chunks];
 				
-				% Convert frames to Java byte arrays
-				java_frames = cell(size(frames));
-				for k = 1:length(frames)
-					java_frames{k} = java.nio.ByteBuffer.wrap(frames{k}).array();
-				end
-				
 				% Warm-up round
-				obj.sendMultipart(socket, java_frames);
-				obj.recvMultipart(socket);
+				obj.sendMultipart(socket, frames);
+				received = obj.recvMultipart(socket);
+
+				if length(frames) ~= length(received)
+					socket.close()
+					break
+				end
 				
 				% Test round
 				tic;
-				obj.sendMultipart(socket, java_frames);
-				obj.recvMultipart(socket);
+				obj.sendMultipart(socket, frames);
+				received = obj.recvMultipart(socket);
 				elapsed_time = toc;
 				
 				% Calculate metrics
@@ -241,7 +227,6 @@ classdef JeroMQBenchmark < handle
 				
 				% Close socket
 				socket.close();
-				socket.dispose();
 				pause(0.5);  % Brief pause between runs
 			end
 			
@@ -260,7 +245,6 @@ classdef JeroMQBenchmark < handle
 			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
 			socket.send('exit',0);
 			socket.close();
-			socket.dispose();
 			% Display the benchmark results in a table format
 			disp('=== BENCHMARK RESULTS ===');
 			fprintf('Benchmark for %i byte header and %i bytes data\n', ...
@@ -313,6 +297,8 @@ classdef JeroMQBenchmark < handle
 		
 		function sendMultipart(obj, socket, frames)
 			% Send a multipart message using JeroMQ
+			if ~exist('socket','var') || isempty(socket); socket = obj.Socket; end
+			if ~exist('frames','var') || isempty(frames); frames = {1:3,2:4,3:5}; end
 			for i = 1:length(frames)
 				if i < length(frames)
 					socket.send(frames{i}, org.zeromq.ZMQ.SNDMORE);
@@ -324,18 +310,26 @@ classdef JeroMQBenchmark < handle
 		
 		function received = recvMultipart(obj, socket)
 			% Receive a multipart message using JeroMQ
+			if ~exist('socket','var') || isempty(socket); socket = obj.Socket; end
+			if isempty(socket); warning('No socket'); return; end
 			received = {};
 			while true
-				frame = socket.recv(0);
+				frame = socket.recv();
 				if ~isempty(frame)
 					received{end+1} = frame;
-					if ~socket.hasReceiveMore()
-						break;
-					end
+					if ~socket.hasReceiveMore(); break; end
 				else
 					break;
 				end
 			end
+		end
+
+		function displayServerInstructions(obj)
+			% Display instructions for starting a server in another MATLAB instance
+			fprintf('To run the server, start another MATLAB instance and run:\n');
+			fprintf('server = JeroMQBenchmark(''Port'', %d);\n', obj.Port);
+			fprintf('server.startServer();\n');
+			input('Press Enter when the server is running...');
 		end
 	end
 	
