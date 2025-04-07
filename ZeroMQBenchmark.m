@@ -32,12 +32,16 @@ classdef ZeroMQBenchmark < handle
 	
 	properties
 		% Configuration parameters
-		Port = 5555
+		Port = 5556
 		IP   = 'localhost'
-		HeaderSize = 2^6  % 64 bytes
-		DataSize = 2^19
+		HeaderSize = 2^7  % 64 bytes
+		DataSize = 2^20
+		BufferSize = 2^20
 		NumRuns = 5
 		ChunkSizes = [2^9, 2^10, 2^13, 2^15, 2^16, 2^17, 2^18, 2^19, 2^20]
+		sendTimeout = 10000
+		receiveTimeout = 10000
+		linger = 0
 		
 		% Results storage
 		Results = struct('chunk_size', {}, 'num_frames', {}, 'latency_ms', {}, 'throughput_mbps', {})
@@ -74,11 +78,12 @@ classdef ZeroMQBenchmark < handle
 			if ~isempty(obj.Socket)
 				fprintf('Socket stopped.\n');
 				obj.Socket.close();
+				obj.Socket = [];
 			end
 			
 			if ~isempty(obj.Context)
-				fprintf('Context terminated.\n');
 				obj.Context.term();
+				fprintf('Context terminated.\n');
 				obj.Context = zmq.Context();
 			end
 		end
@@ -92,15 +97,39 @@ classdef ZeroMQBenchmark < handle
 				% Create and bind socket
 				obj.Socket = obj.Context.socket('REP');
 				obj.Socket.defaultBufferLength = obj.ChunkSizes(end); % Set receive buffer size
+				obj.Socket.set('ZMQ_RCVBUF',obj.ChunkSizes(end));
+				obj.Socket.set('ZMQ_RCVTIMEO', obj.receiveTimeout);
+				obj.Socket.set('ZMQ_SNDTIMEO', obj.sendTimeout);
 				obj.Socket.bind(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
-				fprintf('Server running on port %d. Use Ctrl+C to stop.\n', obj.Port);
+				fprintf('\n\n=== Server running on port %d. Use Ctrl+C to stop.\n\n', obj.Port);
 				
 				% Run server loop
 				try
-					obj.runServerLoop();
+					while obj.Running
+						% Receive multipart message
+						frames = obj.Socket.recv_multipart();
+						fprintf('Received %d frames\n', length(frames));
+						if iscell(frames) && ~isempty(frames)
+							if isa(frames{1},'int32') && frames{1} == -1
+								fprintf('No data received yet...\n');
+							else
+								msg = reshape(char(frames{1}), 1, []);
+								if matches(msg,'exit')
+									fprintf('Got exit message.\n');
+									obj.Socket.send_multipart({uint8('exited')});
+									obj.stopServer;
+								else
+									% Echo back the message
+									obj.Socket.send_multipart(frames);
+								end
+							end
+						end
+					end
 				catch e
-					fprintf('Server stopped: %s\n', e.message);
+					e.getReport()
+					fprintf('\nServer stopped: %s %s\n', e.identifier, e.message);
+					try obj.stopServer(); end
 				end
 			else
 				fprintf('Server is already running\n');
@@ -109,28 +138,13 @@ classdef ZeroMQBenchmark < handle
 		
 		function stopServer(obj)
 			% Stop the server if it's running
-			obj.Running = false;
 			if obj.IsServer
-				obj.IsServer = false;
+				obj.Socket.set('ZMQ_LINGER', obj.linger);
 				obj.Socket.close();
-				fprintf('Server stopped.\n');
+				obj.IsServer = false;
+				fprintf('Server stopped...\n');
 			end
-		end
-		
-		function runServerLoop(obj)
-			% Main server loop
-			while obj.Running
-				% Receive multipart message
-				frames = obj.Socket.recv_multipart();
-				fprintf('Received %d frames\n', length(frames));
-				if isscalar(frames) && strcmpi(char(frames{1}),'exit')
-					fprintf('Got exit message.\n');
-					obj.Socket.send_string('exit');
-					obj.stopServer;
-				end
-				% Echo back the message
-				obj.Socket.send_multipart(frames);
-			end
+			obj.Running = false;
 		end
 		
 		function displayServerInstructions(obj)
@@ -204,6 +218,9 @@ classdef ZeroMQBenchmark < handle
 				% Create and connect socket for this run
 				socket = obj.Context.socket('REQ');
 				socket.defaultBufferLength = obj.ChunkSizes(end); % Set receive buffer size
+				socket.set('ZMQ_RCVBUF',obj.ChunkSizes(end));
+				socket.set('ZMQ_RCVTIMEO', obj.receiveTimeout);
+				socket.set('ZMQ_SNDTIMEO', obj.sendTimeout);
 				socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
 				% Prepare message frames
@@ -211,12 +228,17 @@ classdef ZeroMQBenchmark < handle
 				
 				% Warm-up round
 				obj.sendMultipart(socket, frames);
-				recv = obj.recvMultipart(socket);
+				received = obj.recvMultipart(socket);
+
+				if length(frames) ~= length(received)
+					socket.close()
+					break
+				end
 				
 				% Test round
 				tic;
 				obj.sendMultipart(socket, frames);
-				recv = obj.recvMultipart(socket);
+				received = obj.recvMultipart(socket);
 				elapsed_time = toc;
 				
 				% Calculate metrics
@@ -230,6 +252,7 @@ classdef ZeroMQBenchmark < handle
 					run, latency_ms, throughput_mbps);
 				
 				% Close socket
+				socket.set('LINGER', obj.linger);
 				socket.close();
 				pause(0.5);  % Brief pause between runs
 			end
@@ -249,6 +272,7 @@ classdef ZeroMQBenchmark < handle
 			if ~exist('socket','var') || isempty(socket); socket = obj.Socket; end
 			if ~exist('frames','var') || isempty(frames); frames = {1:3,2:4,3:5}; end
 			for i = 1:length(frames)
+				if ~isa(frames{i},'uint8'); frames{i} = uint8(frames{i}); end
 				if i < length(frames)
 					socket.send(frames{i}, 'sndmore');
 				else
@@ -273,10 +297,7 @@ classdef ZeroMQBenchmark < handle
 		end
 		
 		function displayResults(obj)
-			socket = obj.Context.socket('REQ');
-			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
-			socket.send_string('exit');
-			socket.close();
+			obj.quitServer;
 			% Display the benchmark results in a table format
 			disp('=== BENCHMARK RESULTS ===');
 			fprintf('Benchmark for %i byte header and %i bytes data\n', ...
@@ -301,6 +322,18 @@ classdef ZeroMQBenchmark < handle
 				obj.Results(min_latency_idx).chunk_size, obj.Results(min_latency_idx).latency_ms);
 			fprintf('Highest throughput: %d bytes (%.2fMbps)\n', ...
 				obj.Results(max_throughput_idx).chunk_size, obj.Results(max_throughput_idx).throughput_mbps);
+		end
+
+		function quitServer(obj)
+			socket = obj.Context.socket('REQ');
+			socket.set('ZMQ_RCVBUF',obj.ChunkSizes(end));
+			socket.set('ZMQ_RCVTIMEO', obj.receiveTimeout);
+			socket.set('ZMQ_SNDTIMEO', obj.sendTimeout);
+			socket.set('ZMQ_LINGER', obj.linger);
+			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
+			socket.send_multipart({uint8('exit')});
+			try socket.receive_multipart(); end
+			socket.close();
 		end
 		
 		function plotResults(obj)

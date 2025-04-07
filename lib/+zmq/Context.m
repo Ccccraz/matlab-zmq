@@ -1,22 +1,22 @@
 classdef Context < handle
 
-    properties (GetAccess = public, SetAccess = private)
-        contextPointer
-        spawnedSockets
+	properties (GetAccess = public, SetAccess = private)
+		contextPointer
+		spawnedSockets
 		date
-    end
+	end
 
-    methods
-        function obj = Context(varargin)
-            if (nargin ~= 0)
-                warning('zmq:Context:extraConstructArgs','Extraneous constructor arguments.');
+	methods
+		function obj = Context(varargin)
+			if (nargin ~= 0)
+				warning('zmq:Context:extraConstructArgs','Extraneous constructor arguments.');
 			end
 			obj.date = datetime;
-            % Core API
-            obj.contextPointer = zmq.core.ctx_new();
-            % Initi properties
-            obj.spawnedSockets = {};
-        end
+			% Core API
+			obj.contextPointer = zmq.core.ctx_new();
+			% Initi properties
+			obj.spawnedSockets = {};
+		end
 
 		% This exposes the underlying context pointer.
 		function ptr = get_ptr(obj)

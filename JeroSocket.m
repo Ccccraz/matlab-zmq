@@ -15,6 +15,9 @@ classdef JeroSocket < handle
 		connections = {}
 		%defaultBufferLength  Default buffer length for receiving messages.
 		defaultBufferLength = 2^20
+		sendTimeout = 10000
+		receiveTimeout = 10000
+		linger = 0
 	end
 
 	methods
@@ -52,6 +55,9 @@ classdef JeroSocket < handle
 			% Create the JeroMQ ZSocket
 			obj.socketPointer = contextPointer.createSocket(zmqSocketType);
 			obj.set('ZMQ_RCVBUF',obj.defaultBufferLength);
+			obj.set('ZMQ_SNDTIMEO',obj.sendTimeout);
+			obj.set('ZMQ_RCVTIMEO',obj.receiveTimeout);
+			obj.set('ZMQ_LINGER', obj.linger);
 		end
 
 		function bind(obj, endpoint)

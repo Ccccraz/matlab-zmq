@@ -154,7 +154,7 @@ classdef Socket < handle
 			message = char(obj.recv_multipart(varargin{:}));
 		end
 
-		function varargout = recv(obj, varargin)
+		function data = recv(obj, varargin)
 			%recv  Receives a message.
 			%   message = recv(obj, varargin) receives a message from the socket.
 			%
@@ -165,7 +165,7 @@ classdef Socket < handle
 			%   Outputs:
 			%       message  - The received message.
 			[buffLen, options] = obj.normalize_msg_options(varargin{:});
-			[varargout{1:nargout}] = zmq.core.recv(obj.socketPointer, buffLen, options{:});
+			data = zmq.core.recv(obj.socketPointer, buffLen, options{:});
 		end
 
         function nbytes = send_multipart(obj, message, varargin)
@@ -237,16 +237,19 @@ classdef Socket < handle
 		end
 
 		function status = set(obj, name, value)
-            %set  Sets a socket option.
-            %   set(obj, name, value) sets the value of the specified socket
-            %   option.
-            %
-            %   Inputs:
-            %       obj   - A Socket object.
-            %       name  - The name of the socket option (e.g., 'RCVTIMEO').
-            %       value - The value to set for the option.
-            optName = obj.normalize_const_name(name);
-            status = zmq.core.setsockopt(obj.socketPointer, optName, value);
+			%set  Sets a socket option.
+			%   set(obj, name, value) sets the value of the specified socket
+			%   option.
+			%
+			%   Inputs:
+			%       obj   - A Socket object.
+			%       name  - The name of the socket option (e.g., 'RCVTIMEO').
+			%       value - The value to set for the option.
+			optName = obj.normalize_const_name(name);
+			status = zmq.core.setsockopt(obj.socketPointer, optName, value);
+			if status ~= 0
+				warning('Setting %s did not succeed!',optName);
+			end
         end
 
 		function unbind(obj, endpoint)
@@ -266,36 +269,39 @@ classdef Socket < handle
 			end
 		end
 
-        function status = close(obj)
-            %close  Closes the socket.
-            %   close(obj) closes the ZeroMQ socket.
-            %
-            %   Inputs:
-            %       obj - A Socket object.
-			status = -1;
-			try %#ok<*TRYNC>
-				status = zmq.core.close(obj.socketPointer);
+		function close(obj)
+			%close  Closes the socket.
+			%   close(obj) closes the ZeroMQ socket.
+			%
+			%   Inputs:
+			%       obj - A Socket object.
+			if (obj.socketPointer ~= 0)
+				% Disconnect/Unbind all the endpoints
+				cellfun(@(b) obj.unbind(b), obj.bindings, 'UniformOutput', false);
+				cellfun(@(c) obj.disconnect(c), obj.connections, 'UniformOutput', false);
+				% Avoid linger time
+				obj.set('linger', 0);
+			else
+				obj.bindings = {};
+				obj.connections = {};
+			end
+			try status = zmq.core.close(obj.socketPointer);
 				if (status == 0)
 					obj.socketPointer = 0; % ensure NULL pointer
 				end
 			end
 		end
+		function cleanup(obj)
+			obj.close();
+		end
 
-        function delete(obj)
-            %delete  Destructor for the Socket object.
-            %   delete(obj) is the destructor for the Socket object. It closes the
-            %   socket and releases any associated resources.
-            if (obj.socketPointer ~= 0)
-                % Disconnect/Unbind all the endpoints
-                cellfun(@(b) obj.unbind(b), obj.bindings, 'UniformOutput', false);
-                cellfun(@(c) obj.disconnect(c), obj.connections, 'UniformOutput', false);
-                % Avoid linger time
-                obj.set('LINGER', 0);
-                % close
-                obj.close;
-            end
-        end
-    end
+		function delete(obj)
+			%delete  Destructor for the Socket object.
+			%   delete(obj) is the destructor for the Socket object. It closes the
+			%   socket and releases any associated resources.
+			obj.close();
+		end
+	end
 
 	methods (Access = protected)
 		function normalized = normalize_const_name(~, name)

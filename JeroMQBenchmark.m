@@ -29,6 +29,9 @@ classdef JeroMQBenchmark < handle
 		BufferSize = 2^20
 		NumRuns = 5
 		ChunkSizes = [2^9, 2^10, 2^13, 2^15, 2^16, 2^17, 2^18, 2^19, 2^20]
+		sendTimeout = 10000
+		receiveTimeout = 10000
+		linger = 0
 		
 		% Results storage
 		Results = struct('chunk_size', {}, 'num_frames', {}, 'latency_ms', {}, 'throughput_mbps', {})
@@ -70,6 +73,7 @@ classdef JeroMQBenchmark < handle
 			
 			if ~isempty(obj.Socket)
 				fprintf('Socket stopped.\n');
+				obj.Socket.set('ZMQ_LINGER', obj.linger)
 				obj.Socket.close();
 			end
 			
@@ -84,12 +88,12 @@ classdef JeroMQBenchmark < handle
 			if ~obj.IsServer
 				% Create and bind socket
 				obj.Socket = obj.Context.socket('REP');
-				obj.Socket.set('ZMQ_RCVBUF',obj.BufferSize);
-				obj.Socket.set('ZMQ_RCVTIMEO', -1);
-				obj.Socket.set('ZMQ_SNDTIMEO', -1);
+				obj.Socket.set('ZMQ_RCVBUF',obj.ChunkSizes(end));
+				obj.Socket.set('ZMQ_RCVTIMEO', 10000);
+				obj.Socket.set('ZMQ_SNDTIMEO', 10000);
 				obj.Socket.bind(['tcp://' obj.IP ':' num2str(obj.Port)]);
 				
-				fprintf('Server running on port %d. Use Ctrl+C to stop.\n', obj.Port);
+				fprintf('\n\n=== Server running on port %d. Use Ctrl+C to stop.\n\n', obj.Port);
 				
 				obj.IsServer = true;
 				obj.Running = true;
@@ -98,22 +102,28 @@ classdef JeroMQBenchmark < handle
 				try
 					while obj.Running
 						% Receive multipart message
-						message = obj.recvMultipart(obj.Socket);
-						if ~isempty(message)
-							fprintf('Received %d frames\n', length(message));
-							if iscell(message) && ischar(message{1}) && contains(char(message{1}),'exit')
-								fprintf('Got exit message.\n');
-								obj.sendMultipart(obj.Socket,{'ok'});
-								obj.stopServer;
+						frames = obj.recvMultipart(obj.Socket);
+						if ~isempty(frames)
+							fprintf('Received %d frames\n', length(frames));
+							if iscell(frames)
+								msg = reshape(char(frames{1}), 1, []);
+								if matches(msg,'exit')
+									fprintf('Got exit message.\n');
+									obj.sendMultipart(obj.Socket,{'quitting', 1});
+									obj.stopServer;
+								else
+									% Echo back the message
+									obj.sendMultipart(obj.Socket, frames);
+								end
 							end
-							% Echo back the message
-							obj.sendMultipart(obj.Socket,message);
+							
 						end
 					end
 				catch e
-					fprintf('Server stopped: %s %s\n', e.identifier, e.message);
-					getReport(e);
-					obj.stopServer();
+					fprintf('\nServer stopped: %s %s\n', e.identifier, e.message);
+					getReport(e)
+					try obj.sendMultipart(obj.Socket, {'error'}); end
+					try obj.stopServer(); end
 				end
 			else
 				fprintf('Server is already running\n');
@@ -123,6 +133,7 @@ classdef JeroMQBenchmark < handle
 		function stopServer(obj)
 			% Stop the server if it's running
 			if obj.IsServer
+				obj.Socket.set('ZMQ_LINGER', obj.linger)
 				obj.Socket.close();
 				obj.IsServer = false;
 				fprintf('Server stopped.\n');
@@ -192,9 +203,10 @@ classdef JeroMQBenchmark < handle
 			for run = 1:obj.NumRuns
 				% Create and connect socket for this run
 				socket = obj.Context.socket('REQ');
-				socket.set('ZMQ_RCVBUF',obj.BufferSize);
-				socket.set('ZMQ_RCVTIMEO', -1);
-				socket.set('ZMQ_SNDTIMEO', -1);
+				socket.defaultBufferLength = obj.ChunkSizes(end); % Set receive buffer size
+				socket.set('ZMQ_RCVBUF',obj.ChunkSizes(end));
+				socket.set('ZMQ_RCVTIMEO', obj.receiveTimeout);
+				socket.set('ZMQ_SNDTIMEO', obj.receiveTimeout);
 				socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
 
 				% Prepare message frames
@@ -271,7 +283,7 @@ classdef JeroMQBenchmark < handle
 		function quitServer(obj)
 			socket = obj.Context.socket('REQ');
 			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
-			frames = {'exit',1};
+			frames = {uint8('exit'),uint8([1 2 3])};
 			obj.sendMultipart(socket, frames);
 			received = obj.recvMultipart(socket);
 			socket.close();
@@ -287,7 +299,7 @@ classdef JeroMQBenchmark < handle
 			set(gca, 'XScale', 'log');
 			xlabel('Chunk Size (bytes)');
 			ylabel('Latency (ms)');
-			title('ZeroMQ Frame Size vs. Latency');
+			title('JeroMQ Frame Size vs. Latency');
 			grid on;
 			
 			subplot(2, 1, 2);
@@ -295,10 +307,10 @@ classdef JeroMQBenchmark < handle
 			set(gca, 'XScale', 'log');
 			xlabel('Chunk Size (bytes)');
 			ylabel('Throughput (Mbps)');
-			title('ZeroMQ Frame Size vs. Throughput');
+			title('JeroMQ Frame Size vs. Throughput');
 			grid on;
 			
-			sgtitle('ZeroMQ Frame Size Benchmark Results');
+			sgtitle('JeroMQ Frame Size Benchmark Results');
 		end
 		
 		function sendMultipart(obj, socket, frames)
@@ -306,6 +318,7 @@ classdef JeroMQBenchmark < handle
 			if ~exist('socket','var') || isempty(socket); socket = obj.Socket; end
 			if ~exist('frames','var') || isempty(frames); frames = {1:3,2:4,3:5}; end
 			for i = 1:length(frames)
+				if ~isinteger(frames{i}); frames{i} = uint8(frames{i}); end
 				if i < length(frames)
 					socket.send(frames{i}, org.zeromq.ZMQ.SNDMORE);
 				else
