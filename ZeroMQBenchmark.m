@@ -117,7 +117,7 @@ classdef ZeroMQBenchmark < handle
 								msg = reshape(char(frames{1}), 1, []);
 								if matches(msg,'exit')
 									fprintf('Got exit message.\n');
-									obj.Socket.send_multipart({uint8('exited')});
+									sent = obj.Socket.send_multipart({uint8('exited')});
 									obj.stopServer;
 								else
 									% Echo back the message
@@ -145,6 +145,7 @@ classdef ZeroMQBenchmark < handle
 				fprintf('Server stopped...\n');
 			end
 			obj.Running = false;
+			obj.Socket = [];
 		end
 		
 		function displayServerInstructions(obj)
@@ -326,13 +327,15 @@ classdef ZeroMQBenchmark < handle
 
 		function quitServer(obj)
 			socket = obj.Context.socket('REQ');
-			socket.set('ZMQ_RCVBUF',obj.ChunkSizes(end));
-			socket.set('ZMQ_RCVTIMEO', obj.receiveTimeout);
-			socket.set('ZMQ_SNDTIMEO', obj.sendTimeout);
-			socket.set('ZMQ_LINGER', obj.linger);
+			socket.set('ZMQ_LINGER', 0);
 			socket.connect(['tcp://' obj.IP ':' num2str(obj.Port)]);
 			socket.send_multipart({uint8('exit')});
-			try socket.receive_multipart(); end
+			try 
+				msg = socket.recv_multipart();
+				fprintf('Server said: %s\n',char(msg{1}));
+			catch ME
+				getReport(ME)
+			end
 			socket.close();
 		end
 		
