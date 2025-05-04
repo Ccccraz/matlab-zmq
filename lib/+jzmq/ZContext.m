@@ -1,4 +1,4 @@
-classdef JeroContext < handle
+classdef ZContext < handle
 	%Context  Encapsulates a ZeroMQ context using JeroMQ with ZSocket.
 	%   This class provides a high-level interface for creating and managing
 	%   ZeroMQ contexts and sockets using the JeroMQ ZSocket class.
@@ -6,12 +6,10 @@ classdef JeroContext < handle
 	properties (GetAccess = public, SetAccess = private)
 		%contextPointer  Reference to the underlying JeroMQ context.
 		contextPointer
-		%spawnedSockets  Cell array to track spawned sockets.
-		spawnedSockets
 	end
 
 	methods
-		function obj = JeroContext(varargin)
+		function obj = ZContext(varargin)
 			%Context  Constructs a Context object.
 			%   obj = Context() creates a JeroMQ context.
 
@@ -26,34 +24,13 @@ classdef JeroContext < handle
 
 			% Create a ZContext which is used by ZSocket
 			obj.contextPointer = org.zeromq.ZContext();
-
-			% Initialize properties
-			obj.spawnedSockets = {};
-		end
-
-		function close(obj)
-			% close
-			if ~isempty(obj.contextPointer)
-				% Delete all spawned sockets
-				for n = length(obj.spawnedSockets):-1:1
-					socketObj = obj.spawnedSockets{n};
-					if (isvalid(socketObj))
-						try
-							socketObj.delete();
-							obj.spawnedSockets(n) = [];
-						catch ME
-							getReport(ME);
-						end
-					end
-				end
-			end
 		end
 
 		function delete(obj)
 			%delete  Destructor for the Context object.
 			%   delete(obj) is the destructor for the Context object. It terminates
 			%   the context and releases any associated resources.
-			close(obj);
+
 			% Terminate the context
 			term(obj);
 		end
@@ -105,24 +82,51 @@ classdef JeroContext < handle
 			end
 		end
 
-		function newSocket = socket(obj, socketType)
+		function newSocket = createSocket(obj, socketType)
 			%socket  Creates a new socket within the context.
 			%   newSocket = socket(obj, socketType) creates a new socket of the
 			%   specified type within the context.
 			%
 			%   Inputs:
 			%       obj        - A Context object.
-			%       socketType - The type of the socket to create (e.g., 'ZMQ_REP', 'ZMQ_REQ').
+			%       socketType - The type of the socket to create
 			%
 			%   Outputs:
-			%       newSocket  - A Socket object representing the new socket.
+			%       newSocket  - A ZMQ.Socket object representing the new socket.
 
-			% Create a new JeroMQ Socket object using ZSocket
-			newSocket = JeroSocket(obj.contextPointer, socketType);
+			% Create a new JeroMQ Socket object using ZMQ.Socket
+			arguments (Input)
+				obj
+				socketType (1, 1) jzmq.SocketType
+			end
+			arguments (Output)
+				newSocket jzmq.ZMQ.Socket
+			end
 
-			% Keep tracking of spawned sockets
-			% this is important to the cleanup process
-			obj.spawnedSockets{end+1} = newSocket;
+			pointer = obj.contextPointer.createSocket(socketType.toJava());
+			newSocket = jzmq.ZMQ.Socket(pointer);
+		end
+
+		function Poller = createPoller(obj, size)
+            %createPoller  Constructs a ZMQ.Poller object.
+			%   obj = Poller(pointer) creates a ZMQ.Poller object
+			%
+			%   Inputs:
+			%       size     - the number of Sockets this poller will contain.
+			%
+			%   Outputs:
+			%       Poller  - A ZMQ.Poller object representing the new poller.
+			arguments (Input)
+				obj
+				size (1, 1) double
+			end
+
+			arguments (Output)
+				Poller jzmq.ZMQ.Poller
+			end
+
+			pointer = obj.contextPointer.createPoller(size);
+			Poller = jzmq.ZMQ.Poller(pointer);
 		end
 
 	end
